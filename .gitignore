@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+
+# Google OAuth
+token.json
+credentials.json
+
+# Environment variables
+.env
+
+# Generated data files
+daily_data.json
+*_업무_통합_데이터.txt
+*_최종_보고서.txt
+
+# Discord
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

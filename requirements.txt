@@ -1,0 +1,8 @@
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
+discord.py
+python-dotenv
+google-generativeai
+pytz
+schedule
