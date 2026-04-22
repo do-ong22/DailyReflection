@@ -2,6 +2,9 @@
 
 산발적으로 흩어진 일일 업무 데이터(메일, 채팅, 일정, 문서)를 단일 컨텍스트로 결합하여 업무 누락을 방지하고 자동화된 업무 보고서를 생성하는 Discord Bot입니다.
 
+<img width="680" height="887" alt="image" src="https://github.com/user-attachments/assets/8b41c149-5685-4090-bb05-a834e9ef897e" />
+
+
 ## 주요 기능
 
 - **Google Calendar**: 오늘 + 내일 일정 수집
@@ -78,6 +81,9 @@ python bot.py
 ```
 
 2. Discord 채널에서 명령어 입력:
+
+<img width="750" height="433" alt="image" src="https://github.com/user-attachments/assets/51eca60c-7701-4aaa-a526-48dde49084c4" />
+
 
 | 명령어 | 설명 |
 |--------|------|
