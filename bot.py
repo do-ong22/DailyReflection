@@ -146,20 +146,39 @@ async def on_ready():
     print(f'✅ Logged in as {bot.user.name}')
     print(f'✅ Slash commands synced')
 
-    embed = discord.Embed(
+    help_embed = discord.Embed(
         title="📋 일일 업무 회고 리포트 봇",
         description="Google 데이터(일정, 메일, Drive)를 수집하여 자동으로 리포트를 생성합니다.",
         color=0x5865F2
     )
-    embed.add_field(name="📌 사용 방법", value="1. `/로그인`으로 설정\n2. `/시작`으로 리포트 생성\n3. `/자동실행`으로 매일 자동 설정", inline=False)
-    embed.add_field(name="💡 팁", value="처음에는 `/로그인`만 입력하면 됩니다!", inline=False)
+    help_embed.add_field(
+        name="🔰 처음 설정 (1회만)",
+        value="`/로그인` → Google 로그인 → 설정 완료",
+        inline=False
+    )
+    help_embed.add_field(
+        name="📊 리포트 생성",
+        value="`/시작` → 데이터 수집 → AI 분석 → 리포트 전송",
+        inline=False
+    )
+    help_embed.add_field(
+        name="⚡ 자동 실행",
+        value="`/자동실행 18:00` → 매일 18시에 자동 리포트\n`/자동실행 off` → 자동 실행 해제",
+        inline=False
+    )
+    help_embed.add_field(
+        name="💡 명령어 보기",
+        value="`/도움말` → 모든 명령어 확인",
+        inline=False
+    )
+    help_embed.set_footer(text="💬 궁금한 점이 있으면 '/도움말'을 입력하세요!")
 
     config = load_config()
-    
+
     for guild in bot.guilds:
         for channel in guild.text_channels:
             if channel.permissions_for(guild.me).send_messages:
-                await channel.send(embed=embed)
+                await channel.send(embed=help_embed)
                 break
 
 from notebook_client import NotebookLMClient
@@ -170,14 +189,14 @@ NOTEBOOK_URL = CONFIG.get('notebook_url')
 @bot.tree.command(name='로그인', description='Google 인증을 시작합니다 (처음 1회)')
 async def login(ctx):
     config = load_config()
-    
+
     await ctx.response.send_message("🔐 **Google 인증을 시작합니다...**\n브라우저가 열리면 Google로 로그인 해주세요.")
-    
+
     creds = authenticate()
     if not creds:
         await ctx.followup.send("❌ Google 인증에 실패했습니다. 다시 시도해 주세요.")
         return
-    
+
     await ctx.followup.send("🆕 **새 노트북을 생성합니다...**")
     try:
         client = NotebookLMClient(None)
@@ -187,11 +206,42 @@ async def login(ctx):
     except Exception as e:
         await ctx.followup.send(f"⚠️ 노트북 생성 실패: {e}\nhttps://notebooklm.google.com에서 직접 만들어 주세요.")
         return
-    
+
     await ctx.followup.send(
         f"✅ **설정 완료!**\n\n"
         f"👉 이제 `/시작`으로 리포트를 생성해 보세요!"
     )
+
+@bot.tree.command(name='도움말', description='모든 명령어와 사용 방법을 확인합니다.')
+async def help_cmd(ctx):
+    embed = discord.Embed(
+        title="📋 일일 업무 회고 리포트 봇 - 명령어 도움말",
+        description="Google 데이터(일정, 메일, Drive)를 수집하여 자동으로 리포트를 생성합니다.",
+        color=0x5865F2
+    )
+    embed.add_field(
+        name="🔰 `/로그인`",
+        value="처음 1회 설정\nGoogle 인증 + 노트북 자동 생성",
+        inline=False
+    )
+    embed.add_field(
+        name="📊 `/시작`",
+        value="데이터 수집 + AI 분석 + 리포트 생성",
+        inline=False
+    )
+    embed.add_field(
+        name="📁 `/리포트`",
+        value="Drive에 저장된 최종 보고서 가져오기",
+        inline=False
+    )
+    embed.add_field(
+        name="⚡ `/자동실행 [시간]`",
+        value="매일 정해진 시간에 자동 리포트 생성\nex: `/자동실행 18:00`\n`/자동실행 off`로 해제",
+        inline=False
+    )
+    embed.set_footer(text="💡 처음 사용이라면 '/로그인'을 먼저 입력하세요!")
+
+    await ctx.response.send_message(embed=embed)
 
 @bot.tree.command(name='시작', description='업무 데이터를 수집하여 리포트를 생성합니다.')
 async def start_cmd(ctx):
