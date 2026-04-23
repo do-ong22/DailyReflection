@@ -18,6 +18,7 @@ credentials.json
 daily_data.json
 *_업무_통합_데이터.txt
 *_최종_보고서.txt
+config.json
 
 # Discord
 *.log

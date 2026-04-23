@@ -9,17 +9,27 @@ import threading
 import schedule
 from dotenv import load_dotenv
 from collector import authenticate, get_today_data
+from googleapiclient.discovery import build
 
-# .env 로드
 load_dotenv()
 DISCORD_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
 
-# 디스코드 설정
+CONFIG_FILE = 'config.json'
+
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, 'r') as f:
+            return json.load(f)
+    return {}
+
+def save_config(config):
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
+
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# 스케줄 관련 변수
 schedule_time = None
 scheduler_running = False
 
@@ -138,17 +148,14 @@ async def on_ready():
 
     embed = discord.Embed(
         title="📋 일일 업무 회고 리포트 봇",
-        description="업무 데이터를 자동으로 수집하여 AI 분석 리포트를 생성합니다.",
+        description="Google 데이터(일정, 메일, Drive)를 수집하여 자동으로 리포트를 생성합니다.",
         color=0x5865F2
     )
-    embed.add_field(name="📌 사용 가능한 명령어", value="", inline=False)
-    embed.add_field(name="/login", value="Google OAuth 인증 시작 (최초 1회)", inline=True)
-    embed.add_field(name="/start", value="업무 데이터 수집 및 리포트 생성", inline=True)
-    embed.add_field(name="/report", value="Drive에서 최종 보고서 가져오기", inline=True)
-    embed.add_field(name="/autostart", value="자동 실행 시간 설정 (예: /autostart 18:00)", inline=True)
-    embed.add_field(name="----------", value="----------", inline=False)
-    embed.add_field(name="💡 팁", value="`/autostart 18:00`로 매일 자동 생성 가능!", inline=False)
+    embed.add_field(name="📌 사용 방법", value="1. `/로그인`으로 설정\n2. `/시작`으로 리포트 생성\n3. `/자동실행`으로 매일 자동 설정", inline=False)
+    embed.add_field(name="💡 팁", value="처음에는 `/로그인`만 입력하면 됩니다!", inline=False)
 
+    config = load_config()
+    
     for guild in bot.guilds:
         for channel in guild.text_channels:
             if channel.permissions_for(guild.me).send_messages:
@@ -157,16 +164,50 @@ async def on_ready():
 
 from notebook_client import NotebookLMClient
 
-NOTEBOOK_URL = os.getenv('NOTEBOOK_URL')
+CONFIG = load_config()
+NOTEBOOK_URL = CONFIG.get('notebook_url')
 
-@bot.tree.command(name='start', description='업무 데이터를 수집하고 AI 분석 업무 회고 리포트를 생성합니다.')
-async def start(ctx):
+@bot.tree.command(name='로그인', description='Google 인증을 시작합니다 (처음 1회)')
+async def login(ctx):
+    config = load_config()
+    
+    await ctx.response.send_message("🔐 **Google 인증을 시작합니다...**\n브라우저가 열리면 Google로 로그인 해주세요.")
+    
     creds = authenticate()
     if not creds:
-        await ctx.response.send_message("❌ `/login`을 먼저 진행해 주세요.")
+        await ctx.followup.send("❌ Google 인증에 실패했습니다. 다시 시도해 주세요.")
+        return
+    
+    await ctx.followup.send("🆕 **새 노트북을 생성합니다...**")
+    try:
+        client = NotebookLMClient(None)
+        notebook_url = await client.create_notebook("업무 회고 리포트")
+        config['notebook_url'] = notebook_url
+        save_config(config)
+    except Exception as e:
+        await ctx.followup.send(f"⚠️ 노트북 생성 실패: {e}\nhttps://notebooklm.google.com에서 직접 만들어 주세요.")
+        return
+    
+    await ctx.followup.send(
+        f"✅ **설정 완료!**\n\n"
+        f"👉 이제 `/시작`으로 리포트를 생성해 보세요!"
+    )
+
+@bot.tree.command(name='시작', description='업무 데이터를 수집하여 리포트를 생성합니다.')
+async def start_cmd(ctx):
+    config = load_config()
+    notebook_url = config.get('notebook_url')
+    
+    creds = authenticate()
+    if not creds:
+        await ctx.response.send_message("❌ **설정이 필요합니다!**\n`/로그인`으로 먼저 설정해 주세요.")
+        return
+    
+    if not notebook_url:
+        await ctx.response.send_message("❌ 설정이 필요합니다.\n`/로그인`으로 먼저 설정해 주세요.")
         return
 
-    await ctx.response.send_message("📊 데이터를 수집 중입니다...")
+    await ctx.response.send_message("📊 **데이터를 수집 중입니다...**")
     stats = get_today_data()
     
     date_str = datetime.datetime.now().strftime('%Y-%m-%d')
@@ -176,17 +217,16 @@ async def start(ctx):
         await ctx.followup.send("⚠️ 데이터 파일 생성에 실패했습니다.")
         return
 
-    await ctx.followup.send(f"🧠 **NotebookLM(Gemini 2.5) 분석 시작...**\n(수집 완료: 일정 {stats['events']}, 메일 {stats['emails']}, 채팅 {stats['chats']})")
+    await ctx.followup.send(f"🧠 **분석 중...**\n(수집 완료: 일정 {stats['events']}, 메일 {stats['emails']}, 채팅 {stats['chats']})")
     
     try:
-        # NotebookLM API(MCP) 호출
-        client = NotebookLMClient(NOTEBOOK_URL)
+        client = NotebookLMClient(notebook_url)
         report_content = await client.get_analysis(file_name)
         
-        # 3. 결과 전송
-        await ctx.followup.send(f"🏁 **오늘의 업무 회고 리포트 (NotebookLM 자동 분석)**\n{'-'*30}")
+        os.remove(file_name)
         
-        # 2000자 초과 시 분할 전송
+        await ctx.followup.send(f"🏁 **오늘의 업무 회고 리포트**\n{'-'*30}")
+        
         if len(report_content) > 2000:
             for i in range(0, len(report_content), 2000):
                 await ctx.followup.send(report_content[i:i+2000])
@@ -196,9 +236,13 @@ async def start(ctx):
     except Exception as e:
         await ctx.followup.send(f"❌ 분석 중 오류가 발생했습니다: {e}")
 
-@bot.tree.command(name='report', description='Drive에 저장된 최종 업무 보고서를 가져옵니다.')
-async def report(ctx):
+@bot.tree.command(name='리포트', description='Drive에 저장된 최종 업무 보고서를 가져옵니다.')
+async def report_cmd(ctx):
     creds = authenticate()
+    if not creds:
+        await ctx.response.send_message("❌ **설정이 필요합니다.**\n`/로그인 [노트북URL]`로 먼저 설정해 주세요.")
+        return
+    
     date_str = datetime.datetime.now().strftime('%Y-%m-%d')
     file_name = f"{date_str}_최종_보고서.txt"
     
@@ -210,22 +254,16 @@ async def report(ctx):
         files = results.get('files', [])
         
         if not files:
-            await ctx.followup.send(f"⚠️ `{file_name}` 파일을 찾을 수 없습니다. NotebookLM 결과를 해당 이름으로 드라이브에 저장해 주세요.")
+            await ctx.followup.send(f"⚠️ `{file_name}` 파일을 찾을 수 없습니다.\nNotebookLM 결과를 해당 이름으로 드라이브에 저장해 주세요.")
             return
             
         file_id = files[0]['id']
         content = service.files().get_media(fileId=file_id).execute().decode('utf-8')
         
-        await ctx.followup.send(f"🏁 **NotebookLM 기반 최종 업무 회고 리포트** ({date_str})\n{'-'*30}\n{content}")
+        await ctx.followup.send(f"🏁 **오늘의 업무 회고 리포트** ({date_str})\n{'-'*30}\n{content}")
         
     except Exception as e:
         await ctx.followup.send(f"❌ 오류 발생: {e}")
-
-@bot.tree.command(name='login', description='Google OAuth 인증을 시작합니다 (최초 1회)')
-async def login(ctx):
-    await ctx.response.send_message("🔗 구글 인증을 시작합니다. 콘솔의 안내를 따라주세요.")
-    authenticate()
-    await ctx.response.send_message("✅ 인증 완료! 이제 `/start`를 사용해 보세요.")
 
 async def run_scheduled_report():
     """스케줄된 시간에 실행될 리포트 생성"""
@@ -234,6 +272,11 @@ async def run_scheduled_report():
     if not creds:
         return
 
+    config = load_config()
+    notebook_url = config.get('notebook_url')
+    if not notebook_url:
+        return
+    
     stats = get_today_data()
     date_str = datetime.datetime.now().strftime('%Y-%m-%d')
     file_name = f"{date_str}_업무_통합_데이터.txt"
@@ -242,8 +285,10 @@ async def run_scheduled_report():
         return
 
     try:
-        client = NotebookLMClient(NOTEBOOK_URL)
+        client = NotebookLMClient(notebook_url)
         report_content = await client.get_analysis(file_name)
+
+        os.remove(file_name)
 
         for guild in bot.guilds:
             for channel in guild.text_channels:
@@ -264,16 +309,16 @@ def schedule_runner():
         schedule.run_pending()
         asyncio.sleep(1)
 
-@bot.tree.command(name='autostart', description='자동 실행 시간 설정 (예: /autostart 18:00)')
-@app_commands.describe(time="설정할 시간 (예: 18:00), on/off로 활성화/비활성화")
-async def autostart(ctx, time: str = None):
+@bot.tree.command(name='자동실행', description='매일 자동 실행 시간 설정')
+@app_commands.describe(time='시간 (예: 18:00), on/off로 활성화/비활성화')
+async def autostart_cmd(ctx, time: str = None):
     global schedule_time, scheduler_running
 
     if time is None:
         if schedule_time:
-            await ctx.response.send_message(f"⏰ 현재 자동 실행 시간: **{schedule_time}** (on/off로 변경 가능)")
+            await ctx.response.send_message(f"⏰ 현재 자동 실행 시간: **{schedule_time}**\n`/자동실행 18:00`으로 변경, `/자동실행 off`로 해제")
         else:
-            await ctx.response.send_message("⏰ 자동 실행이 설정되지 않았습니다. `/autostart 18:00` 형태로 시간을 설정해 주세요.")
+            await ctx.response.send_message("⏰ 자동 실행이 설정되지 않았습니다.\n`/자동실행 18:00`으로 시간을 설정해 주세요.")
         return
 
     if time.lower() == "off":
@@ -288,13 +333,13 @@ async def autostart(ctx, time: str = None):
             schedule.every().day.at(schedule_time).do(lambda: asyncio.run(run_scheduled_report()))
             await ctx.response.send_message(f"⏰ 자동 실행이 활성화되었습니다. 매일 {schedule_time}에 실행됩니다.")
         else:
-            await ctx.response.send_message("⏰ 설정된 시간이 없습니다. `/autostart 18:00` 형태로 시간을 설정해 주세요.")
+            await ctx.response.send_message("⏰ 설정된 시간이 없습니다. `/자동실행 18:00`으로 시간을 설정해 주세요.")
         return
 
     try:
         datetime.datetime.strptime(time, "%H:%M")
     except ValueError:
-        await ctx.response.send_message("❌ 시간 형식이 올바르지 않습니다. 예: 18:00")
+        await ctx.response.send_message("❌ 시간 형식이 올바르지 않습니다.\n예: `/자동실행 18:00`")
         return
 
     schedule_time = time
@@ -302,7 +347,7 @@ async def autostart(ctx, time: str = None):
     schedule.clear()
     schedule.every().day.at(time).do(lambda: asyncio.run(run_scheduled_report()))
 
-    await ctx.response.send_message(f"⏰ 자동 실행 시간이 **{time}**로 설정되었습니다. 이제 매일 이 시간에 자동으로 보고서가 생성됩니다.")
+    await ctx.response.send_message(f"⏰ 자동 실행 시간이 **{time}**로 설정되었습니다.\n매일 이 시간에 자동으로 리포트가 생성됩니다.")
 
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)

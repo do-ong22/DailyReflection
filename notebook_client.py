@@ -13,7 +13,38 @@ def get_kst_today():
 class NotebookLMClient:
     def __init__(self, notebook_url):
         self.notebook_url = notebook_url
-        self.notebook_id = notebook_url.split('/')[-1]
+        self.notebook_id = notebook_url.split('/')[-1] if notebook_url else None
+
+    async def create_notebook(self, title="업무 회고"):
+        """새 노트북을 생성하고 URL을 반환합니다."""
+        try:
+            process = await asyncio.create_subprocess_exec(
+                NLM_PATH, "notebook", "create", title,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            
+            if stdout:
+                result = stdout.decode('utf-8').strip()
+                try:
+                    data = json.loads(result)
+                    if "value" in data and "url" in data["value"]:
+                        return data["value"]["url"]
+                except:
+                    pass
+                if "ID:" in result:
+                    notebook_id = result.split("ID: ")[-1].strip()
+                    return f"https://notebooklm.google.com/notebook/{notebook_id}"
+                return result
+            elif stderr:
+                error = stderr.decode('utf-8')
+                raise Exception(error)
+            else:
+                raise Exception("노트북 생성 실패")
+                
+        except Exception as e:
+            raise Exception(f"노트북 생성 오류: {e}")
 
     async def clean_all_sources(self):
         """모든 소스를 삭제합니다."""
